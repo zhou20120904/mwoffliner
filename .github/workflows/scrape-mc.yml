@@ -59,7 +59,7 @@ jobs:
       # 7. 使用当前生成的代码运行刮取任务
       - name: Run local MWoffliner
         run: |
-          node lib/cli.js \
+          sudo node lib/cli.js \
             --mwUrl="https://zh.minecraft.wiki" \
             --adminEmail="zhou20120904@126.com" \
             --mwActionApiPath="/api.php" \
