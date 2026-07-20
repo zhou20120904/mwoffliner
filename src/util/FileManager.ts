@@ -32,6 +32,7 @@ class FileManager {
   }
 
   private hosts: Map<string, HostData> = new Map()
+  private queuedPaths: Set<string> = new Set()
 
   private get filesToDownloadXPath(): RKVS<FileDetail> {
     return RedisStore.filesStore
@@ -44,6 +45,7 @@ class FileManager {
    */
   public reset(): void {
     this.hosts = new Map()
+    this.queuedPaths = new Set()
   }
 
   /**
@@ -56,6 +58,18 @@ class FileManager {
    * method twice with different urls / data for other usage in the future.
    */
   public async addFileToProcess(path: string, detail: FileDetail): Promise<void> {
+    if (this.queuedPaths.has(path)) {
+      const existing = await this.filesToDownloadXPath.get(path)
+      if (existing) {
+        const isHigherRes = existing.width < (detail.width || 10e6) || existing.mult < (detail.mult || 1)
+        if (!isHigherRes) return
+        // Resolution upgrade: update store only, queue already has this path
+        await this.filesToDownloadXPath.set(path, detail)
+      }
+      return
+    }
+    this.queuedPaths.add(path)
+
     const existing = await this.filesToDownloadXPath.get(path)
     if (existing) {
       const isHigherRes = existing.width < (detail.width || 10e6) || existing.mult < (detail.mult || 1)
@@ -80,12 +94,13 @@ class FileManager {
     const toSet: KVS<FileDetail> = {}
 
     for (const [path, detail] of Object.entries(files)) {
-      const existing = existingVals[path]
+      const existing = existingVals[path] || (this.queuedPaths.has(path) ? await this.filesToDownloadXPath.get(path) : null)
       if (existing) {
         const isHigherRes = existing.width < (detail.width || 10e6) || existing.mult < (detail.mult || 1)
         if (!isHigherRes) continue
         toSet[path] = detail // upgrade only, no queue push
       } else {
+        this.queuedPaths.add(path)
         toSet[path] = detail
         await this.pushToHostQueue(path, detail)
       }
@@ -212,9 +227,19 @@ class FileManager {
         .then(async (resp) => {
           if (resp && resp.content && resp.contentType) {
             const item = new StringItem(fileToDownload.path, resp.contentType, null, { FRONT_ARTICLE: 0 }, resp.content)
-            await zimCreatorMutex.runExclusive(() => zimCreator.addItem(item))
-            dump.status.files.success += 1
-            hostData.downloadSuccess += 1
+            try {
+              await zimCreatorMutex.runExclusive(() => zimCreator.addItem(item))
+              dump.status.files.success += 1
+              hostData.downloadSuccess += 1
+            } catch (err: any) {
+              if (err && err.message && (err.message.includes('Impossible to add') || err.message.includes("existing dirent's title"))) {
+                logger.info(`File [${fileToDownload.path}] already exists in ZIM, skipping duplicate.`)
+                dump.status.files.success += 1
+                hostData.downloadSuccess += 1
+              } else {
+                throw err
+              }
+            }
           } else {
             throw new Error(`Bad response received: ${resp}`)
           }
