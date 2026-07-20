@@ -32,14 +32,34 @@ jobs:
           chmod -R 777 ${{ github.workspace }}/out
           chmod -R 777 ${{ github.workspace }}/tmp
 
-      # 3. 运行 mwoffliner 容器进行抓取
-      - name: Run MWoffliner via Docker
+      # 3. 安装并启动 Redis 服务（MWoffliner 运行时必需）
+      - name: Start Redis
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}/out:/output \
-            -v ${{ github.workspace }}/tmp:/tmpdir \
-            ghcr.io/openzim/mwoffliner:dev \
-            mwoffliner \
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo service redis-server start
+          # 验证 redis 是否正常启动
+          redis-cli ping
+
+      # 4. 设置匹配项目要求的 Node.js 版本 (项目中要求 >=26 <27)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: 'npm'
+
+      # 5. 安装依赖
+      - name: Install dependencies
+        run: npm ci
+
+      # 6. 编译 TypeScript 代码（该步骤生成 lib/ 目录下的 JS 代码）
+      - name: Build project
+        run: npm run build
+
+      # 7. 使用当前生成的代码运行刮取任务
+      - name: Run local MWoffliner
+        run: |
+          node lib/cli.js \
             --mwUrl="https://zh.minecraft.wiki" \
             --adminEmail="zhou20120904@126.com" \
             --mwActionApiPath="/api.php" \
@@ -58,7 +78,7 @@ jobs:
             --javaScript="all" \
             --logLevel="debug"
 
-      # 4. 上传生成的 ZIM 归档文件
+      # 8. 上传生成的 ZIM 归档文件
       - name: Upload ZIM file as Artifact
         uses: actions/upload-artifact@v4
         with:
