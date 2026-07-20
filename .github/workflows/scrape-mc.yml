@@ -69,7 +69,6 @@ jobs:
             --customZimLanguage="zho" \
             --publisher="openZIM" \
             --outputDirectory="/output" \
-            --osTmpDir="/tmpdir" \
             --webp \
             --forceRender="ActionParse" \
             --speed=5 \
