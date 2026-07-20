@@ -1,0 +1,67 @@
+name: Scrape Chinese Minecraft Wiki with MWoffliner
+
+on:
+  workflow_dispatch: # 允许您在 GitHub 页面手动点击按钮触发抓取
+  schedule:
+    - cron: '0 0 1 * *' # 可选：每月 1 号自动运行一次
+
+jobs:
+  scrape-mc:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 1. 清理磁盘空间
+      # 默认 GitHub Runner 仅剩余约 14GB 磁盘空间，而 Minecraft Wiki 包含大量图片
+      # 此步骤可清理无用组件，释放出大约 30GB 的额外空间
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+      # 2. 创建挂载目录
+      - name: Create output and temp directories
+        run: |
+          mkdir -p ${{ github.workspace }}/out
+          mkdir -p ${{ github.workspace }}/tmp
+          chmod -R 777 ${{ github.workspace }}/out
+          chmod -R 777 ${{ github.workspace }}/tmp
+
+      # 3. 运行 mwoffliner 容器进行抓取
+      - name: Run MWoffliner via Docker
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/out:/output \
+            -v ${{ github.workspace }}/tmp:/tmpdir \
+            ghcr.io/openzim/mwoffliner:dev \
+            mwoffliner \
+            --mwUrl="https://zh.minecraft.wiki" \
+            --adminEmail="zhou20120904@126.com" \
+            --mwActionApiPath="/api.php" \
+            --mwModulePath="/load.php" \
+            --customZimTitle="Minecraft Wiki (zh)" \
+            --customZimDescription="中文我的世界维基致力于收集一切和 Minecraft 有关的信息。" \
+            --customZimLanguage="zho" \
+            --publisher="openZIM" \
+            --outputDirectory="/output" \
+            --osTmpDir="/tmpdir" \
+            --webp \
+            --forceRender="ActionParse" \
+            --speed=5 \
+            --langVariant="zh-cn" \
+            --getCategories \
+            --javaScript="all" \
+            --logLevel="debug"
+
+      # 4. 上传生成的 ZIM 归档文件
+      - name: Upload ZIM file as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-wiki-zh
+          path: ${{ github.workspace }}/out/*.zim
+          retention-days: 32
